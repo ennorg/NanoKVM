@@ -11,6 +11,7 @@ import { ControlRegionConfig, InputRegion } from '@/types';
 import * as storage from '@/lib/localstorage.ts';
 import { client } from '@/lib/websocket.ts';
 import { picoclawChatOpenAtom } from '@/jotai/picoclaw.ts';
+import { isKeyboardOpenAtom, virtualKeyboardHeightAtom } from '@/jotai/keyboard.ts';
 import {
   controlRegionModeAtom,
   inputRegionAtom,
@@ -75,6 +76,8 @@ const Console = () => {
   const setSelectedOriginalResolution = useSetAtom(selectedOriginalResolutionAtom);
   const [isPicoclawChatOpen, setPicoclawChatOpen] = useAtom(picoclawChatOpenAtom);
   const isMobileMenuCollapsed = useAtomValue(mobileMenuCollapsedAtom);
+  const isKeyboardOpen = useAtomValue(isKeyboardOpenAtom);
+  const keyboardHeight = useAtomValue(virtualKeyboardHeightAtom);
 
   // Losing the ai grant closes the chat: its socket is dropped with the
   // grant, so leaving the sidebar open would only show send failures.
@@ -230,7 +233,7 @@ const Console = () => {
   }
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-neutral-950">
+    <div className="h-screen h-[100dvh] w-screen overflow-hidden bg-neutral-950">
       <Head title={t('head.desktop')} />
 
       {isBigScreen && <Notification />}
@@ -240,14 +243,16 @@ const Console = () => {
         <div
           className="relative flex h-full min-h-0 w-full min-w-0"
           style={{
+            boxSizing: 'border-box',
             paddingTop:
               isBigScreen || isMobileMenuCollapsed
                 ? undefined
-                : 'calc(3.5rem + env(safe-area-inset-top))'
+                : 'calc(3.5rem + env(safe-area-inset-top))',
+            paddingBottom: !isBigScreen && isKeyboardOpen ? keyboardHeight : undefined
           }}
         >
           <Menu />
-          <div className="h-full min-h-0 w-full min-w-0">
+          <div className="min-h-0 min-w-0 flex-1">
             <Splitter
               className="h-full w-full"
               style={{ height: '100%', width: '100%' }}

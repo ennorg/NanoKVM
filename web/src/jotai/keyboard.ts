@@ -24,6 +24,7 @@ export const keyboardLockAtom = atom(null, (get, set, action: KeyboardLockAction
 
 // is the virtual keyboard opened
 export const isKeyboardOpenAtom = atom(false);
+export const virtualKeyboardHeightAtom = atom(0);
 
 // leader key code for bypassing browser shortcuts (empty string means disabled)
 export const leaderKeyAtom = atom('');

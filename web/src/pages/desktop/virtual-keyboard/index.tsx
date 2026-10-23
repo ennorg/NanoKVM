@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AppleOutlined, WindowsOutlined } from '@ant-design/icons';
 import clsx from 'clsx';
-import { useAtom } from 'jotai';
+import { useAtom, useSetAtom } from 'jotai';
 import { XIcon } from 'lucide-react';
 import { KeyboardReact as Keyboard } from 'react-simple-keyboard';
 import type { KeyboardButtonTheme } from 'react-simple-keyboard';
@@ -16,7 +16,7 @@ import { useMediaQuery } from 'react-responsive';
 import { getKeycode, getModifierBit } from '@/lib/keymap.ts';
 import * as storage from '@/lib/localstorage.ts';
 import { client, MessageEvent } from '@/lib/websocket.ts';
-import { isKeyboardOpenAtom } from '@/jotai/keyboard.ts';
+import { isKeyboardOpenAtom, virtualKeyboardHeightAtom } from '@/jotai/keyboard.ts';
 
 import {
   doubleKeys,
@@ -31,6 +31,7 @@ export const VirtualKeyboard = () => {
   const isBigScreen = useMediaQuery({ minWidth: 850 });
 
   const [isKeyboardOpen, setIsKeyboardOpen] = useAtom(isKeyboardOpenAtom);
+  const setKeyboardHeight = useSetAtom(virtualKeyboardHeightAtom);
 
   const [keyboardLayout, setKeyboardLayout] = useState('default');
   const [keyboardSystem, setKeyboardSystem] = useState('win');
@@ -38,6 +39,25 @@ export const VirtualKeyboard = () => {
   const [activeModifierKeys, setActiveModifierKeys] = useState<string[]>([]);
 
   const keyboardRef = useRef<any>(null);
+  const [drawerElement, setDrawerElement] = useState<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    if (!isKeyboardOpen || isBigScreen) {
+      setKeyboardHeight(0);
+      return;
+    }
+
+    if (!drawerElement) return;
+
+    const updateHeight = () => setKeyboardHeight(drawerElement.getBoundingClientRect().height);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(drawerElement);
+    return () => {
+      observer.disconnect();
+      setKeyboardHeight(0);
+    };
+  }, [drawerElement, isKeyboardOpen, isBigScreen, setKeyboardHeight]);
 
   const systems = [
     { value: 'win', icon: <WindowsOutlined /> },
@@ -227,6 +247,7 @@ export const VirtualKeyboard = () => {
     <Drawer.Root open={isKeyboardOpen} onOpenChange={setIsKeyboardOpen} modal={false}>
       <Drawer.Portal>
         <Drawer.Content
+          ref={setDrawerElement}
           className={clsx(
             'fixed bottom-0 left-0 right-0 z-[999] mx-auto overflow-hidden rounded bg-white outline-none',
             isBigScreen ? 'w-[820px]' : 'w-full max-w-[650px]'
