@@ -1,10 +1,10 @@
 import { useEffect, useRef } from 'react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 
 import { MouseReportAbsolute } from '@/lib/mouse.ts';
 import { client, MessageEvent } from '@/lib/websocket.ts';
 import { scrollDirectionAtom, scrollIntervalAtom } from '@/jotai/mouse.ts';
-import { inputRegionAtom, resolutionAtom } from '@/jotai/screen.ts';
+import { inputRegionAtom, mobileZoomAtom, resolutionAtom, videoScaleAtom } from '@/jotai/screen.ts';
 
 import {
   FrameContent,
@@ -14,6 +14,7 @@ import {
   getRenderedMediaRect,
   MediaSize
 } from '../screen/geometry.ts';
+import { panZoomedScreen } from '../screen/pan-zoom.ts';
 import { MouseAbsoluteEvent } from './types.ts';
 
 enum MouseButton {
@@ -29,6 +30,13 @@ export const Absolute = () => {
   const inputRegion = useAtomValue(inputRegionAtom);
   const scrollDirection = useAtomValue(scrollDirectionAtom);
   const scrollInterval = useAtomValue(scrollIntervalAtom);
+  const mobileZoom = useAtomValue(mobileZoomAtom);
+  const videoScale = useAtomValue(videoScaleAtom);
+  const setMobileZoom = useSetAtom(mobileZoomAtom);
+  const mobileZoomRef = useRef(mobileZoom);
+  const videoScaleRef = useRef(videoScale);
+  mobileZoomRef.current = mobileZoom;
+  videoScaleRef.current = videoScale;
 
   const mouseRef = useRef(new MouseReportAbsolute());
   const lastPosRef = useRef({ x: 0.5, y: 0.5 });
@@ -42,6 +50,8 @@ export const Absolute = () => {
   const isDraggingRef = useRef(false);
   const isMultiTouchRef = useRef(false);
   const isTouchActiveRef = useRef(false);
+  const isScreenPanningRef = useRef(false);
+  const lastPanPosRef = useRef({ x: 0, y: 0 });
   const pressedButtonRef = useRef<MouseButton | null>(null);
   const touchStartPosRef = useRef({ x: 0, y: 0 });
   const lastTapTimeRef = useRef(0);
@@ -54,6 +64,7 @@ export const Absolute = () => {
   const DOUBLE_TAP_DELAY = 400;
   const DOUBLE_TAP_DRAG_WINDOW = 800;
   const DOUBLE_TAP_DISTANCE = 24;
+  const PAN_HOLD_DELAY = 400;
 
   useEffect(() => {
     const screen = document.getElementById('screen');
@@ -108,6 +119,13 @@ export const Absolute = () => {
     function sendReport(report: Uint8Array) {
       const data = new Uint8Array([MessageEvent.Mouse, ...report]);
       client.send(data);
+    }
+
+    function isMobileZoomed() {
+      return (
+        window.matchMedia('(max-width: 849px)').matches &&
+        videoScaleRef.current * mobileZoomRef.current.scale > 1.001
+      );
     }
 
     // Mouse down event
@@ -177,6 +195,7 @@ export const Absolute = () => {
 
       if (!getCorrectedCoords(touch.clientX, touch.clientY)) {
         isTouchActiveRef.current = false;
+        isScreenPanningRef.current = false;
         isMultiTouchRef.current = e.touches.length > 1;
         hasMoveRef.current = true;
         clearLongPressTimer();
@@ -191,6 +210,7 @@ export const Absolute = () => {
 
       if (e.touches.length > 1) {
         isMultiTouchRef.current = true;
+        isScreenPanningRef.current = false;
         hasMoveRef.current = true;
         clearLongPressTimer();
         releasePressedButton();
@@ -212,6 +232,8 @@ export const Absolute = () => {
       // Reset states
       lastTouchYRef.current = touch.clientY;
       isLongPressRef.current = false;
+      isScreenPanningRef.current = false;
+      lastPanPosRef.current = { x: touch.clientX, y: touch.clientY };
       hasMoveRef.current = false;
       isDraggingRef.current = false;
       isMultiTouchRef.current = false;
@@ -221,12 +243,20 @@ export const Absolute = () => {
       clearLongPressTimer();
 
       const coordinate = getCoordinate(touch);
-      if (coordinate) {
+      const isZoomed = isMobileZoomed();
+      if (coordinate && !isZoomed) {
         handleMouseEvent({ type: 'move', x: coordinate.x, y: coordinate.y });
       }
 
       // Start long press
-      if (!isDoubleTapCandidateRef.current) {
+      if (isZoomed) {
+        longPressTimerRef.current = setTimeout(() => {
+          isScreenPanningRef.current = true;
+          hasMoveRef.current = true;
+          isDoubleTapCandidateRef.current = false;
+          doubleTapDragArmedUntilRef.current = 0;
+        }, PAN_HOLD_DELAY);
+      } else if (!isDoubleTapCandidateRef.current) {
         longPressTimerRef.current = setTimeout(() => {
           isLongPressRef.current = true;
           pressedButtonRef.current = MouseButton.Right;
@@ -250,6 +280,20 @@ export const Absolute = () => {
         return;
       }
       const touch = e.touches[0];
+      if (e.touches.length === 1 && isScreenPanningRef.current) {
+        const next = panZoomedScreen(
+          target,
+          mobileZoomRef.current,
+          videoScaleRef.current,
+          touch.clientX - lastPanPosRef.current.x,
+          touch.clientY - lastPanPosRef.current.y
+        );
+        lastPanPosRef.current = { x: touch.clientX, y: touch.clientY };
+        mobileZoomRef.current = next;
+        setMobileZoom(next);
+        return;
+      }
+      lastPanPosRef.current = { x: touch.clientX, y: touch.clientY };
       const coordinate = getCoordinate(touch);
 
       if (!coordinate) {
@@ -263,6 +307,7 @@ export const Absolute = () => {
       // Handle two-finger scroll first
       if (e.touches.length > 1) {
         isMultiTouchRef.current = true;
+        isScreenPanningRef.current = false;
         hasMoveRef.current = true;
         clearLongPressTimer();
         releasePressedButton();
@@ -331,6 +376,13 @@ export const Absolute = () => {
 
       clearLongPressTimer();
 
+      if (isScreenPanningRef.current) {
+        isScreenPanningRef.current = false;
+        isTouchActiveRef.current = false;
+        isDoubleTapCandidateRef.current = false;
+        return;
+      }
+
       const endTouch = e.changedTouches[0];
       const isTap =
         !isMultiTouchRef.current &&
@@ -341,6 +393,10 @@ export const Absolute = () => {
         !!getCorrectedCoords(endTouch.clientX, endTouch.clientY);
 
       if (isTap) {
+        if (endTouch && isMobileZoomed()) {
+          const coordinate = getCoordinate(endTouch);
+          if (coordinate) handleMouseEvent({ type: 'move', x: coordinate.x, y: coordinate.y });
+        }
         handleMouseEvent({ type: 'mousedown', button: MouseButton.Left });
         handleMouseEvent({ type: 'mouseup', button: MouseButton.Left });
         const currentTime = Date.now();
@@ -368,6 +424,7 @@ export const Absolute = () => {
       disableEvent(e);
 
       clearLongPressTimer();
+      isScreenPanningRef.current = false;
 
       releasePressedButton();
 
@@ -531,7 +588,7 @@ export const Absolute = () => {
         clearTimeout(longPressTimerRef.current);
       }
     };
-  }, [inputRegion, resolution, scrollDirection, scrollInterval]);
+  }, [inputRegion, resolution, scrollDirection, scrollInterval, setMobileZoom]);
 
   // disable default events
   function disableEvent(event: Event) {

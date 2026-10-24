@@ -1,13 +1,14 @@
 import { useEffect, useRef } from 'react';
 import { message } from 'antd';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 
 import { MouseReportRelative } from '@/lib/mouse.ts';
 import { client, MessageEvent } from '@/lib/websocket.ts';
 import { scrollDirectionAtom, scrollIntervalAtom } from '@/jotai/mouse.ts';
-import { resolutionAtom } from '@/jotai/screen.ts';
+import { mobileZoomAtom, resolutionAtom, videoScaleAtom } from '@/jotai/screen.ts';
 
+import { panZoomedScreen } from '../screen/pan-zoom.ts';
 import { MouseRelativeEvent } from './types.ts';
 
 export const Relative = () => {
@@ -17,6 +18,13 @@ export const Relative = () => {
   const resolution = useAtomValue(resolutionAtom);
   const scrollDirection = useAtomValue(scrollDirectionAtom);
   const scrollInterval = useAtomValue(scrollIntervalAtom);
+  const mobileZoom = useAtomValue(mobileZoomAtom);
+  const videoScale = useAtomValue(videoScaleAtom);
+  const setMobileZoom = useSetAtom(mobileZoomAtom);
+  const mobileZoomRef = useRef(mobileZoom);
+  const videoScaleRef = useRef(videoScale);
+  mobileZoomRef.current = mobileZoom;
+  videoScaleRef.current = videoScale;
 
   const mouseRef = useRef(new MouseReportRelative());
   const isLockedRef = useRef(false);
@@ -29,6 +37,7 @@ export const Relative = () => {
   const isTouchLongPressRef = useRef(false);
   const hasTouchMoveRef = useRef(false);
   const isMultiTouchRef = useRef(false);
+  const isScreenPanningRef = useRef(false);
   const pressedTouchButtonRef = useRef<number | null>(null);
   const lastTouchEndTimeRef = useRef(0);
   const lastTapTimeRef = useRef(0);
@@ -42,6 +51,7 @@ export const Relative = () => {
   const DOUBLE_TAP_DELAY = 400;
   const DOUBLE_TAP_DRAG_WINDOW = 800;
   const DOUBLE_TAP_DISTANCE = 24;
+  const PAN_HOLD_DELAY = 400;
 
   useEffect(() => {
     const screen = document.getElementById('screen');
@@ -64,6 +74,13 @@ export const Relative = () => {
     target.addEventListener('touchmove', handleTouchMove, touchOptions);
     target.addEventListener('touchend', handleTouchEnd, touchOptions);
     target.addEventListener('touchcancel', handleTouchCancel, touchOptions);
+
+    function isMobileZoomed() {
+      return (
+        window.matchMedia('(max-width: 849px)').matches &&
+        videoScaleRef.current * mobileZoomRef.current.scale > 1.001
+      );
+    }
 
     // Mouse click event
     function handleMouseClick(event: MouseEvent) {
@@ -119,6 +136,7 @@ export const Relative = () => {
 
       if (e.touches.length > 1) {
         isMultiTouchRef.current = true;
+        isScreenPanningRef.current = false;
         hasTouchMoveRef.current = true;
         clearTouchLongPressTimer();
         releasePressedTouchButton();
@@ -151,6 +169,7 @@ export const Relative = () => {
       touchStartPosRef.current = { x: touch.clientX, y: touch.clientY };
       pendingTouchDeltaRef.current = { x: 0, y: 0 };
       isTouchLongPressRef.current = false;
+      isScreenPanningRef.current = false;
       hasTouchMoveRef.current = false;
       isMultiTouchRef.current = e.touches.length > 1;
       releasePressedTouchButton();
@@ -158,7 +177,15 @@ export const Relative = () => {
 
       clearTouchLongPressTimer();
 
-      if (!isDoubleTapCandidateRef.current) {
+      if (isMobileZoomed()) {
+        touchLongPressTimerRef.current = setTimeout(() => {
+          isScreenPanningRef.current = true;
+          hasTouchMoveRef.current = true;
+          isDoubleTapCandidateRef.current = false;
+          doubleTapDragArmedUntilRef.current = 0;
+          pendingTouchDeltaRef.current = { x: 0, y: 0 };
+        }, PAN_HOLD_DELAY);
+      } else if (!isDoubleTapCandidateRef.current) {
         touchLongPressTimerRef.current = setTimeout(() => {
           isTouchLongPressRef.current = true;
           pressedTouchButtonRef.current = 2;
@@ -178,6 +205,7 @@ export const Relative = () => {
 
       if (e.touches.length > 1) {
         isMultiTouchRef.current = true;
+        isScreenPanningRef.current = false;
         hasTouchMoveRef.current = true;
         pendingTouchDeltaRef.current = { x: 0, y: 0 };
         clearTouchLongPressTimer();
@@ -190,6 +218,19 @@ export const Relative = () => {
       const deltaX = touch.clientX - lastTouchPosRef.current.x;
       const deltaY = touch.clientY - lastTouchPosRef.current.y;
       lastTouchPosRef.current = { x: touch.clientX, y: touch.clientY };
+
+      if (e.touches.length === 1 && isScreenPanningRef.current) {
+        const next = panZoomedScreen(
+          target,
+          mobileZoomRef.current,
+          videoScaleRef.current,
+          deltaX,
+          deltaY
+        );
+        mobileZoomRef.current = next;
+        setMobileZoom(next);
+        return;
+      }
 
       if (e.touches.length > 1) {
         const currentTime = Date.now();
@@ -253,6 +294,12 @@ export const Relative = () => {
 
       clearTouchLongPressTimer();
 
+      if (isScreenPanningRef.current) {
+        resetTouchState();
+        isDoubleTapCandidateRef.current = false;
+        return;
+      }
+
       const isTap =
         !isMultiTouchRef.current &&
         !hasTouchMoveRef.current &&
@@ -283,6 +330,7 @@ export const Relative = () => {
     function handleTouchCancel(e: TouchEvent) {
       disableEvent(e);
       clearTouchLongPressTimer();
+      isScreenPanningRef.current = false;
 
       releasePressedTouchButton();
 
@@ -328,7 +376,7 @@ export const Relative = () => {
       target.removeEventListener('touchcancel', handleTouchCancel, touchOptions.capture);
       clearTouchLongPressTimer();
     };
-  }, [resolution, scrollDirection, scrollInterval]);
+  }, [resolution, scrollDirection, scrollInterval, setMobileZoom]);
 
   // Mouse handler
   function handleMouseEvent(event: MouseRelativeEvent) {
@@ -395,6 +443,7 @@ export const Relative = () => {
     isTouchLongPressRef.current = false;
     hasTouchMoveRef.current = false;
     isMultiTouchRef.current = false;
+    isScreenPanningRef.current = false;
     pressedTouchButtonRef.current = null;
   }
 
