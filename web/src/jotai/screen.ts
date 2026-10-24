@@ -11,6 +11,7 @@ export const isHdmiEnabledAtom = atom(true);
 export const videoModeAtom = atom('');
 
 export const videoScaleAtom = atom<number>(1.0);
+export const mobileZoomAtom = atom({ scale: 1, x: 0, y: 0 });
 
 // browser screen resolution
 export const resolutionAtom = atom<Resolution | null>(null);

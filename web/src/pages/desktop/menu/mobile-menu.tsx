@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { getMenuDisabledItems, getMenuDisplayMode } from '@/lib/localstorage.ts';
 import { isKeyboardOpenAtom } from '@/jotai/keyboard.ts';
 import { picoclawChatOpenAtom } from '@/jotai/picoclaw.ts';
+import { mobileZoomAtom, videoScaleAtom } from '@/jotai/screen.ts';
 import {
   menuCloseSignalAtom,
   menuDisabledItemsAtom,
@@ -46,6 +47,9 @@ export const MobileMenu = () => {
   const [collapsed, setCollapsed] = useAtom(mobileMenuCollapsedAtom);
   const [isKeyboardOpen, setKeyboardOpen] = useAtom(isKeyboardOpenAtom);
   const isChatOpen = useAtomValue(picoclawChatOpenAtom);
+  const mobileZoom = useAtomValue(mobileZoomAtom);
+  const videoScale = useAtomValue(videoScaleAtom);
+  const isZoomed = mobileZoom.scale * videoScale > 1;
 
   useEffect(() => {
     setDisabledItems(getMenuDisabledItems());
@@ -58,10 +62,14 @@ export const MobileMenu = () => {
   }, [displayMode, setCollapsed]);
 
   useEffect(() => {
-    if (displayMode !== 'auto' || collapsed || moreOpen || submenuOpenCount > 0) return;
+    if (isZoomed) setCollapsed(false);
+  }, [isZoomed, setCollapsed]);
+
+  useEffect(() => {
+    if (displayMode !== 'auto' || collapsed || moreOpen || submenuOpenCount > 0 || isZoomed) return;
     const timer = setTimeout(() => setCollapsed(true), 5000);
     return () => clearTimeout(timer);
-  }, [collapsed, displayMode, moreOpen, setCollapsed, submenuOpenCount]);
+  }, [collapsed, displayMode, isZoomed, moreOpen, setCollapsed, submenuOpenCount]);
 
   useEffect(() => setMoreOpen(false), [closeSignal]);
 
